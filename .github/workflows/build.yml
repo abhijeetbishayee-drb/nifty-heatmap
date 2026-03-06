@@ -4,20 +4,21 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v3
-    - uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y git zip unzip openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev libffi-dev libssl-dev build-essential
-        pip install buildozer==1.5.0 cython==0.29.33
-    - name: Build APK
-      run: |
-        yes | buildozer android debug
-    - name: Upload APK
-      uses: actions/upload-artifact@v3
-      with:
-        name: nifty-heatmap-apk
-        path: bin/*.apk
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install deps
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y git zip unzip openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev libffi-dev libssl-dev build-essential libltdl-dev
+          pip install buildozer==1.5.0 cython==0.29.33
+      - name: Build APK
+        run: |
+          cd $GITHUB_WORKSPACE
+          yes | buildozer android debug 2>&1
+      - name: Upload APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: nifty-heatmap-apk
+          path: bin/*.apk
