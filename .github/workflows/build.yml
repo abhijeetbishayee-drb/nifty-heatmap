@@ -18,10 +18,16 @@ jobs:
           mkdir -p ~/.buildozer/android/platform
           wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
           unzip -q android-ndk-r25b-linux.zip -d ~/.buildozer/android/platform/
-          echo "NDK ready"
-      - name: Build APK
+      - name: Remove old NDK
         run: |
-          export ANDROIDNDK=~/.buildozer/android/platform/android-ndk-r25b
+          rm -rf /usr/local/lib/android/sdk/ndk/27.3.13750724
+          rm -rf /usr/local/lib/android/sdk/ndk/29.0.14206865
+      - name: Build APK
+        env:
+          ANDROIDNDK: /home/runner/.buildozer/android/platform/android-ndk-r25b
+          ANDROIDAPI: "33"
+          ANDROIDMINAPI: "21"
+        run: |
           cd $GITHUB_WORKSPACE
           yes | buildozer android debug 2>&1
       - name: Upload APK
