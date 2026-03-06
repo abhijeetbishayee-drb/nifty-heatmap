@@ -11,10 +11,17 @@ jobs:
       - name: Install deps
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y git zip unzip openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev libffi-dev libssl-dev build-essential libltdl-dev
+          sudo apt-get install -y git zip unzip openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev libffi-dev libssl-dev build-essential
           pip install buildozer==1.5.0 cython==0.29.33
+      - name: Download NDK r25b
+        run: |
+          mkdir -p ~/.buildozer/android/platform
+          wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
+          unzip -q android-ndk-r25b-linux.zip -d ~/.buildozer/android/platform/
+          echo "NDK ready"
       - name: Build APK
         run: |
+          export ANDROIDNDK=~/.buildozer/android/platform/android-ndk-r25b
           cd $GITHUB_WORKSPACE
           yes | buildozer android debug 2>&1
       - name: Upload APK
