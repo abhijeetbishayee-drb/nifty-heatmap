@@ -5,7 +5,7 @@ package.domain  = com.nse
 source.dir      = .
 source.include_exts = py
 version         = 1.0
-requirements    = python3,kivy==2.2.1,yfinance,pytz,pandas,numpy,plyer,requests,urllib3,multitasking,frozendict,beautifulsoup4,lxml
+requirements    = python3,kivy==2.2.1,yfinance,pytz,pandas,numpy,plyer,requests,urllib3,multitasking,frozendict,beautifulsoup4
 orientation     = portrait
 fullscreen      = 0
 android.permissions = INTERNET
