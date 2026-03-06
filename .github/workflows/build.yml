@@ -18,9 +18,14 @@ jobs:
           mkdir -p ~/.buildozer/android/platform
           wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
           unzip -q android-ndk-r25b-linux.zip -d ~/.buildozer/android/platform/
-          echo "android.ndk_path = $HOME/.buildozer/android/platform/android-ndk-r25b" >> buildozer.spec
       - name: Build APK
         run: |
+          unset ANDROIDNDK
+          unset ANDROID_NDK
+          unset ANDROID_NDK_HOME
+          unset ANDROID_NDK_ROOT
+          unset ANDROID_NDK_LATEST_HOME
+          export ANDROIDNDK=$HOME/.buildozer/android/platform/android-ndk-r25b
           cd $GITHUB_WORKSPACE
           yes | buildozer android debug 2>&1
       - name: Upload APK
