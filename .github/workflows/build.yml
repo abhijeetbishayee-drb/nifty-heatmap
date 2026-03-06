@@ -13,20 +13,13 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y git zip unzip openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev libffi-dev libssl-dev build-essential
           pip install buildozer==1.5.0 cython==0.29.33
-      - name: Download NDK r25b
+      - name: Setup NDK r25b
         run: |
           mkdir -p ~/.buildozer/android/platform
           wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
           unzip -q android-ndk-r25b-linux.zip -d ~/.buildozer/android/platform/
-      - name: Remove old NDK
-        run: |
-          rm -rf /usr/local/lib/android/sdk/ndk/27.3.13750724
-          rm -rf /usr/local/lib/android/sdk/ndk/29.0.14206865
+          echo "android.ndk_path = $HOME/.buildozer/android/platform/android-ndk-r25b" >> buildozer.spec
       - name: Build APK
-        env:
-          ANDROIDNDK: /home/runner/.buildozer/android/platform/android-ndk-r25b
-          ANDROIDAPI: "33"
-          ANDROIDMINAPI: "21"
         run: |
           cd $GITHUB_WORKSPACE
           yes | buildozer android debug 2>&1
