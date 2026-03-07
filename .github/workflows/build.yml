@@ -33,9 +33,14 @@ jobs:
         run: |
           unset ANDROIDNDK ANDROID_NDK ANDROID_NDK_HOME ANDROID_NDK_ROOT ANDROID_NDK_LATEST_HOME
           cd $GITHUB_WORKSPACE
-          yes | buildozer android debug 2>&1 | tee build.log || true
-          grep -i "error\|ERROR\|failed\|assert" build.log | grep -v "^#" | grep -v "warn" | tail -50
-          exit $(tail -1 build.log | grep -c "exit code 0" || echo 1)
+          yes | buildozer android debug 2>&1 | tee build.log
+          if grep -q "Android packaging done" build.log; then
+            echo "BUILD SUCCESSFUL"
+            exit 0
+          else
+            echo "BUILD FAILED"
+            exit 1
+          fi
 
       - name: Upload logs on failure
         if: failure()
@@ -49,4 +54,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nifty-heatmap-apk
-          path: bin/*.apk
+          path: |
+            bin/*.apk
+            .buildozer/android/platform/build-arm64-v8a/dists/niftyheatmap/build/outputs/apk/debug/*.apk
