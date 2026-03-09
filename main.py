@@ -14,26 +14,43 @@ import sys
 import os
 import traceback
 
-print("APP STARTING - Python version:", sys.version)
+# Write debug log to a file we can read via adb
+LOG_PATH = '/data/data/com.nse.niftyheatmap/files/debug.log'
 
-# Delete stale main.pyc so updated main.py always runs on next launch
+def dlog(msg):
+    try:
+        with open(LOG_PATH, 'a') as f:
+            f.write(str(msg) + '\n')
+    except Exception:
+        pass
+    # Also try android logging
+    try:
+        from android.runnable import run_on_ui_thread
+    except Exception:
+        pass
+    try:
+        import ctypes
+        libc = ctypes.CDLL('libc.so')
+    except Exception:
+        pass
+
+# Clear log on start
 try:
-    pyc = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'main.pyc')
-    if os.path.exists(pyc):
-        os.remove(pyc)
-        print("Deleted stale main.pyc")
-except Exception as e:
-    print("Could not delete main.pyc:", e)
+    open(LOG_PATH, 'w').close()
+except Exception:
+    pass
+
+dlog("APP STARTING - Python: " + sys.version)
 
 yf = None
 yf_error = None
 try:
-    print("Attempting to import yfinance...")
+    dlog("Attempting to import yfinance...")
     import yfinance as yf
-    print("yfinance imported OK:", yf.__version__)
+    dlog("yfinance imported OK: " + str(yf.__version__))
 except Exception as e:
     yf_error = traceback.format_exc()
-    print("yfinance import FAILED:", yf_error)
+    dlog("yfinance import FAILED: " + yf_error)
 
 # Nifty 50 tickers on Yahoo Finance
 NIFTY50 = [
@@ -202,14 +219,13 @@ class NiftyHeatmapApp(App):
         threading.Thread(target=self.fetch_data, daemon=True).start()
 
     def fetch_data(self):
-        print("fetch_data called, yf =", yf, "yf_error =", yf_error)
+        dlog("fetch_data called, yf=" + str(yf))
         if yf is None:
-            msg = f'yf missing: {str(yf_error)[:60]}' if yf_error else 'yfinance not available'
-            print("ERROR:", msg)
-            Clock.schedule_once(lambda dt: setattr(
-                self.status_label, 'text', msg), 0)
+            msg = f'Err: {str(yf_error)[:80]}' if yf_error else 'yfinance not available'
+            dlog("ERROR: " + msg)
+            Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', msg[:40]), 0)
             return
-        print("yfinance available, starting download...")
+        dlog("Starting yf.download...")
 
         results = {}
         try:
@@ -238,7 +254,7 @@ class NiftyHeatmapApp(App):
 
         except Exception as e:
             full_err = traceback.format_exc()
-            print("FETCH ERROR:", full_err)
+            dlog("FETCH ERROR: " + full_err)
             Clock.schedule_once(lambda dt: setattr(
                 self.status_label, 'text', f'Err: {str(e)[:50]}'), 0)
             return
