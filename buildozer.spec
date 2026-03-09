@@ -16,7 +16,6 @@ android.ndk_path = /home/runner/.buildozer/android/platform/android-ndk-r25b
 android.sdk_path = /home/runner/.buildozer/android/platform/android-sdk
 android.archs   = arm64-v8a
 android.extra_manifest_application_arguments = android:hardwareAccelerated="false"
-android.no_byte_compile_python = 1
 
 [buildozer]
 log_level = 2
