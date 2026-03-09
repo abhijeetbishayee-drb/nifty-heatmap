@@ -10,10 +10,20 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.utils import get_color_from_hex
 
+import sys
+import traceback
+
+print("APP STARTING - Python version:", sys.version)
+
+yf = None
+yf_error = None
 try:
+    print("Attempting to import yfinance...")
     import yfinance as yf
-except ImportError:
-    yf = None
+    print("yfinance imported OK:", yf.__version__)
+except Exception as e:
+    yf_error = traceback.format_exc()
+    print("yfinance import FAILED:", yf_error)
 
 # Nifty 50 tickers on Yahoo Finance
 NIFTY50 = [
@@ -182,10 +192,14 @@ class NiftyHeatmapApp(App):
         threading.Thread(target=self.fetch_data, daemon=True).start()
 
     def fetch_data(self):
+        print("fetch_data called, yf =", yf, "yf_error =", yf_error)
         if yf is None:
+            msg = f'yf missing: {str(yf_error)[:60]}' if yf_error else 'yfinance not available'
+            print("ERROR:", msg)
             Clock.schedule_once(lambda dt: setattr(
-                self.status_label, 'text', 'yfinance not available'), 0)
+                self.status_label, 'text', msg), 0)
             return
+        print("yfinance available, starting download...")
 
         results = {}
         try:
@@ -213,8 +227,10 @@ class NiftyHeatmapApp(App):
                     results[ticker] = (None, None)
 
         except Exception as e:
+            full_err = traceback.format_exc()
+            print("FETCH ERROR:", full_err)
             Clock.schedule_once(lambda dt: setattr(
-                self.status_label, 'text', f'Error: {str(e)[:30]}'), 0)
+                self.status_label, 'text', f'Err: {str(e)[:50]}'), 0)
             return
 
         # Update UI on main thread
