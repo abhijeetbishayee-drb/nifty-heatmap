@@ -36,6 +36,14 @@ jobs:
           rm -rf .buildozer/android/platform/build-arm64-v8a/dists
           rm -rf .buildozer/android/platform/build-arm64-v8a/build/python-installs
           yes | buildozer android debug 2>&1 | tee build.log
+
+          # Patch AndroidManifest.xml to disable hardware acceleration (fixes EGL crash on Samsung)
+          MANIFEST=".buildozer/android/platform/build-arm64-v8a/dists/niftyheatmap/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            sed -i 's/<application /<application android:hardwareAccelerated="false" /' "$MANIFEST"
+            echo "Patched AndroidManifest.xml"
+          fi
+
           if grep -q "Android packaging done" build.log; then
             echo "BUILD SUCCESSFUL"
             exit 0
