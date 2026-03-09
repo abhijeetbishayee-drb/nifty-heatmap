@@ -11,9 +11,19 @@ from kivy.core.window import Window
 from kivy.utils import get_color_from_hex
 
 import sys
+import os
 import traceback
 
 print("APP STARTING - Python version:", sys.version)
+
+# Delete stale main.pyc so updated main.py always runs on next launch
+try:
+    pyc = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'main.pyc')
+    if os.path.exists(pyc):
+        os.remove(pyc)
+        print("Deleted stale main.pyc")
+except Exception as e:
+    print("Could not delete main.pyc:", e)
 
 yf = None
 yf_error = None
