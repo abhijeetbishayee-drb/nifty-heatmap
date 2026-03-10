@@ -13,6 +13,9 @@ from kivy.utils import get_color_from_hex
 import sys
 import os
 import traceback
+import json
+import threading
+import requests
 
 # Write debug log to a file we can read via adb
 LOG_PATH = '/data/data/com.nse.niftyheatmap/files/debug.log'
@@ -21,16 +24,6 @@ def dlog(msg):
     try:
         with open(LOG_PATH, 'a') as f:
             f.write(str(msg) + '\n')
-    except Exception:
-        pass
-    # Also try android logging
-    try:
-        from android.runnable import run_on_ui_thread
-    except Exception:
-        pass
-    try:
-        import ctypes
-        libc = ctypes.CDLL('libc.so')
     except Exception:
         pass
 
@@ -42,15 +35,32 @@ except Exception:
 
 dlog("APP STARTING - Python: " + sys.version)
 
-yf = None
-yf_error = None
-try:
-    dlog("Attempting to import yfinance...")
-    import yfinance as yf
-    dlog("yfinance imported OK: " + str(yf.__version__))
-except Exception as e:
-    yf_error = traceback.format_exc()
-    dlog("yfinance import FAILED: " + yf_error)
+def fetch_nifty_data():
+    """Fetch Nifty 50 data directly from Yahoo Finance API using requests."""
+    results = {}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json',
+    }
+    for ticker in NIFTY50:
+        try:
+            url = f'https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=2d'
+            resp = requests.get(url, headers=headers, timeout=10)
+            data = resp.json()
+            closes = data['chart']['result'][0]['indicators']['quote'][0]['close']
+            closes = [c for c in closes if c is not None]
+            if len(closes) >= 2:
+                prev, curr = closes[-2], closes[-1]
+                pct = ((curr - prev) / prev) * 100
+                results[ticker] = (curr, pct)
+            elif len(closes) == 1:
+                results[ticker] = (closes[-1], None)
+            else:
+                results[ticker] = (None, None)
+        except Exception as e:
+            dlog(f"Error fetching {ticker}: {e}")
+            results[ticker] = (None, None)
+    return results
 
 # Nifty 50 tickers on Yahoo Finance
 NIFTY50 = [
@@ -219,55 +229,26 @@ class NiftyHeatmapApp(App):
         threading.Thread(target=self.fetch_data, daemon=True).start()
 
     def fetch_data(self):
-        dlog("fetch_data called, yf=" + str(yf))
-        if yf is None:
-            msg = f'Err: {str(yf_error)[:80]}' if yf_error else 'yfinance not available'
-            dlog("ERROR: " + msg)
-            Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', msg[:40]), 0)
-            return
-        dlog("Starting yf.download...")
-
-        results = {}
+        dlog("fetch_data called - using direct Yahoo Finance API")
         try:
-            # Batch download — much faster than one by one
-            tickers_str = ' '.join(NIFTY50)
-            data = yf.download(tickers_str, period='2d', interval='1d',
-                               group_by='ticker', auto_adjust=True, progress=False)
-            for ticker in NIFTY50:
-                try:
-                    if ticker in data.columns.get_level_values(0):
-                        closes = data[ticker]['Close'].dropna()
-                    else:
-                        closes = data['Close'].dropna() if len(NIFTY50) == 1 else None
-                    if closes is not None and len(closes) >= 2:
-                        prev = float(closes.iloc[-2])
-                        curr = float(closes.iloc[-1])
-                        pct = ((curr - prev) / prev) * 100
-                        results[ticker] = (curr, pct)
-                    elif closes is not None and len(closes) == 1:
-                        curr = float(closes.iloc[-1])
-                        results[ticker] = (curr, None)
-                    else:
-                        results[ticker] = (None, None)
-                except Exception:
-                    results[ticker] = (None, None)
+            results = fetch_nifty_data()
+            dlog(f"Got results for {len(results)} tickers")
+
+            def update_ui(dt):
+                for ticker, (price, pct) in results.items():
+                    self.grid.refresh_tile(ticker, price, pct)
+                from datetime import datetime
+                now = datetime.now().strftime('%H:%M:%S')
+                loaded = sum(1 for p, _ in results.values() if p is not None)
+                self.status_label.text = f'Updated {now} ({loaded}/50)'
+
+            Clock.schedule_once(update_ui, 0)
 
         except Exception as e:
             full_err = traceback.format_exc()
             dlog("FETCH ERROR: " + full_err)
             Clock.schedule_once(lambda dt: setattr(
                 self.status_label, 'text', f'Err: {str(e)[:50]}'), 0)
-            return
-
-        # Update UI on main thread
-        def update_ui(dt):
-            for ticker, (price, pct) in results.items():
-                self.grid.refresh_tile(ticker, price, pct)
-            from datetime import datetime
-            now = datetime.now().strftime('%H:%M:%S')
-            self.status_label.text = f'Updated {now}'
-
-        Clock.schedule_once(update_ui, 0)
 
 
 if __name__ == '__main__':
