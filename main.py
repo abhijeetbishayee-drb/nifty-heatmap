@@ -44,7 +44,7 @@ NIFTY50 = [
     "TVSMOTOR.NS", "TATASTEEL.NS", "BAJAJFINSV.NS", "BPCL.NS", "DRREDDY.NS",
     "CIPLA.NS", "EICHERMOT.NS", "HEROMOTOCO.NS", "INDUSINDBK.NS", "GRASIM.NS",
     "APOLLOHOSP.NS", "BRITANNIA.NS", "DIVISLAB.NS", "TATACONSUM.NS", "SBILIFE.NS",
-    "HDFCLIFE.NS", "BAJAJ-AUTO.NS", "UPL.NS", "LTIM.NS", "HINDALCO.NS",
+    "HDFCLIFE.NS", "BAJAJ-AUTO.NS", "UPL.NS", "LTIMINDLTD.NS", "HINDALCO.NS",
 ]
 
 SHORT_NAMES = {
@@ -58,7 +58,7 @@ SHORT_NAMES = {
     "ULTRACEMCO.NS": "ULTRACEMC",
     "BAJAJ-AUTO.NS": "BAJAJ-AUT",
     "ADANIPORTS.NS": "ADANIPORT",
-    "BAJFINANCE.NS": "BAJFINANC",
+    "LTIMINDLTD.NS": "LTIM",
     "COALINDIA.NS":  "COALINDIA",
     "TVSMOTOR.NS":   "TMPV",
 }
@@ -89,29 +89,14 @@ def pct_to_color(pct):
         return (0.55, 0.0, 0.0, 1)
 
 def fetch_nifty_data():
-    results = {}
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'application/json',
     }
-    # Also fetch Nifty 50 index
-    index_data = {}
-    try:
-        url = 'https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?interval=1d&range=2d'
-        resp = requests.get(url, headers=headers, timeout=10)
-        data = resp.json()
-        closes = data['chart']['result'][0]['indicators']['quote'][0]['close']
-        closes = [c for c in closes if c is not None]
-        if len(closes) >= 2:
-            prev, curr = closes[-2], closes[-1]
-            pct = ((curr - prev) / prev) * 100
-            pts = curr - prev
-            index_data = {'price': curr, 'pct': pct, 'pts': pts}
-        dlog(f"Index: {index_data}")
-    except Exception as e:
-        dlog(f"Index fetch error: {e}")
 
-    for ticker in NIFTY50:
+    def fetch_one(ticker):
         try:
             url = f'https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=2d'
             resp = requests.get(url, headers=headers, timeout=10)
@@ -121,14 +106,35 @@ def fetch_nifty_data():
             if len(closes) >= 2:
                 prev, curr = closes[-2], closes[-1]
                 pct = ((curr - prev) / prev) * 100
-                results[ticker] = (curr, pct)
+                return ticker, (curr, pct)
             elif len(closes) == 1:
-                results[ticker] = (closes[-1], None)
+                return ticker, (closes[-1], None)
             else:
-                results[ticker] = (None, None)
+                return ticker, (None, None)
         except Exception as e:
             dlog(f"Error fetching {ticker}: {e}")
-            results[ticker] = (None, None)
+            return ticker, (None, None)
+
+    # Fetch index and all stocks in parallel
+    all_tickers = ['^NSEI'] + NIFTY50
+    results = {}
+    index_data = {}
+
+    with ThreadPoolExecutor(max_workers=15) as executor:
+        futures = {executor.submit(fetch_one, t): t for t in all_tickers}
+        for future in as_completed(futures):
+            ticker, value = future.result()
+            if ticker == '^NSEI':
+                if value[0] is not None and value[1] is not None:
+                    curr = value[0]
+                    pct = value[1]
+                    prev = curr / (1 + pct / 100)
+                    pts = curr - prev
+                    index_data = {'price': curr, 'pct': pct, 'pts': pts}
+            else:
+                results[ticker] = value
+
+    dlog(f"Fetched {len(results)} stocks, index={index_data}")
     return results, index_data
 
 
