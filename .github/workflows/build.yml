@@ -39,10 +39,15 @@ jobs:
             "platform-tools" \
             "ndk;25.2.9519653"
 
+      - name: Link system SDK to buildozer path
+        run: |
+          mkdir -p /home/runner/.buildozer/android/platform
+          ln -s /usr/local/lib/android/sdk \
+            /home/runner/.buildozer/android/platform/android-sdk
+          ln -s /usr/local/lib/android/sdk/ndk/25.2.9519653 \
+            /home/runner/.buildozer/android/platform/android-ndk-r25b
+
       - name: Build APK
-        env:
-          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-          ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/25.2.9519653
         run: |
           buildozer android debug
 
