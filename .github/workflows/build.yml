@@ -1,5 +1,6 @@
 name: Build APK
 on: [push]
+
 jobs:
   build:
     runs-on: ubuntu-22.04
@@ -12,22 +13,40 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Set up python
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: Install deps
+      - name: Install system dependencies
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y git zip unzip openjdk-17-jdk autoconf automake libtool autopoint gettext pkg-config zlib1g-dev libffi-dev libssl-dev build-essential libltdl-dev cmake m4
-          pip install buildozer==1.5.0 cython==0.29.33
+          sudo apt-get install -y \
+            git zip unzip openjdk-17-jdk \
+            autoconf automake libtool autopoint gettext \
+            pkg-config zlib1g-dev libffi-dev libssl-dev \
+            build-essential libltdl-dev cmake m4
 
-      - name: Setup NDK r25b
+      # FIX: pin cython to 0.29.33 — newer versions break p4a with Python 3.10
+      - name: Install Python build tools
+        run: pip install buildozer==1.5.0 cython==0.29.33
+
+      - name: Setup Android NDK r25b
         run: |
           mkdir -p /home/runner/.buildozer/android/platform
           wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
           unzip -q android-ndk-r25b-linux.zip -d /home/runner/.buildozer/android/platform/
+
+      # FIX: install Android SDK cmdline-tools so 'android.api = 34' resolves correctly
+      - name: Setup Android SDK (API 34)
+        run: |
+          mkdir -p /home/runner/.buildozer/android/platform/android-sdk/cmdline-tools
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip -O cmdtools.zip
+          unzip -q cmdtools.zip -d /home/runner/.buildozer/android/platform/android-sdk/cmdline-tools/
+          mv /home/runner/.buildozer/android/platform/android-sdk/cmdline-tools/cmdline-tools \
+             /home/runner/.buildozer/android/platform/android-sdk/cmdline-tools/latest
+          yes | /home/runner/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager \
+            "platform-tools" "platforms;android-34" "build-tools;34.0.0" 2>/dev/null
 
       - name: Build APK
         run: |
@@ -37,20 +56,76 @@ jobs:
           rm -rf .buildozer/android/platform/build-arm64-v8a/build/python-installs
           yes | buildozer android debug 2>&1 | tee build.log
 
-          # Patch AndroidManifest.xml to disable hardware acceleration (fixes EGL crash on Samsung)
+          # Patch AndroidManifest — disable hardware acceleration (fixes EGL crash on Samsung)
           MANIFEST=".buildozer/android/platform/build-arm64-v8a/dists/niftyheatmap/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
-            sed -i 's/<application /<application android:hardwareAccelerated="false" /' "$MANIFEST"
-            echo "Patched AndroidManifest.xml"
+            # FIX: only patch if not already patched to avoid duplicate attribute
+            if ! grep -q 'hardwareAccelerated' "$MANIFEST"; then
+              sed -i 's/<application /<application android:hardwareAccelerated="false" /' "$MANIFEST"
+              echo "Patched AndroidManifest.xml — disabled hardwareAccelerated"
+            fi
+
+            # FIX: add network_security_config for HTTPS on Android 9+
+            if ! grep -q 'networkSecurityConfig' "$MANIFEST"; then
+              sed -i 's/<application /<application android:networkSecurityConfig="@xml\/network_security_config" /' "$MANIFEST"
+              echo "Patched AndroidManifest.xml — added networkSecurityConfig"
+            fi
           fi
+
+          # FIX: create network_security_config.xml to allow HTTPS to Yahoo Finance
+          NET_SEC_DIR=".buildozer/android/platform/build-arm64-v8a/dists/niftyheatmap/src/main/res/xml"
+          mkdir -p "$NET_SEC_DIR"
+          cat > "$NET_SEC_DIR/network_security_config.xml" << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <network-security-config>
+            <base-config cleartextTrafficPermitted="false">
+              <trust-anchors>
+                <certificates src="system"/>
+                <certificates src="user"/>
+              </trust-anchors>
+            </base-config>
+          </network-security-config>
+          EOF
+          echo "Created network_security_config.xml"
 
           if grep -q "Android packaging done" build.log; then
             echo "BUILD SUCCESSFUL"
-            exit 0
           else
-            echo "BUILD FAILED"
+            echo "BUILD FAILED — last 50 lines of log:"
+            tail -50 build.log
             exit 1
           fi
+
+      # FIX: sign the APK with apksigner (v1 + v2 + v3) so it installs on Android 7+
+      - name: Sign APK
+        run: |
+          APK=$(find bin -name "*.apk" | head -1)
+          if [ -z "$APK" ]; then
+            echo "No APK found in bin/"
+            exit 1
+          fi
+
+          # Generate a debug keystore (reproducible, not for Play Store)
+          keytool -genkey -v \
+            -keystore debug-release.jks \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -alias niftyheatmap \
+            -storepass android -keypass android \
+            -dname "CN=NiftyHeatmap, OU=Dev, O=NSE, L=Mumbai, ST=MH, C=IN" 2>/dev/null
+
+          SIGNED_APK="${APK%.apk}-signed.apk"
+
+          # FIX: apksigner writes v1 + v2 + v3 signatures — installs on Android 5 through 14+
+          $ANDROID_HOME/build-tools/34.0.0/apksigner sign \
+            --ks debug-release.jks \
+            --ks-key-alias niftyheatmap \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out "$SIGNED_APK" \
+            "$APK"
+
+          $ANDROID_HOME/build-tools/34.0.0/apksigner verify --verbose "$SIGNED_APK"
+          echo "Signed APK: $SIGNED_APK"
 
       - name: Upload logs on failure
         if: failure()
@@ -65,5 +140,4 @@ jobs:
         with:
           name: nifty-heatmap-apk
           path: |
-            bin/*.apk
-            .buildozer/android/platform/build-arm64-v8a/dists/niftyheatmap/build/outputs/apk/debug/*.apk
+            bin/*-signed.apk
