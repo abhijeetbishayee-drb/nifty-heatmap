@@ -20,8 +20,7 @@ android.permissions = INTERNET,ACCESS_NETWORK_STATE
 android.api     = 34
 android.minapi  = 21
 android.ndk     = 25b
-android.ndk_path = /home/runner/.buildozer/android/platform/android-ndk-r25b
-android.sdk_path = /home/runner/.buildozer/android/platform/android-sdk
+
 android.archs   = arm64-v8a
 
 # FIX: enable cleartext traffic fallback and disable hardware accel to prevent EGL crash
