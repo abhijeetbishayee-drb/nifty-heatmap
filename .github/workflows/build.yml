@@ -15,8 +15,14 @@ jobs:
         run: |
           yes | buildozer android debug
 
+      - name: Verify APK exists
+        run: |
+          ls -lh bin/*.apk
+          echo "✅ APK built successfully!"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: nifty-heatmap-apk
           path: bin/*.apk
+          retention-days: 30
