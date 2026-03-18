@@ -44,7 +44,7 @@ NIFTY50 = [
     "TVSMOTOR.NS", "TATASTEEL.NS", "BAJAJFINSV.NS", "BPCL.NS", "DRREDDY.NS",
     "CIPLA.NS", "EICHERMOT.NS", "HEROMOTOCO.NS", "INDUSINDBK.NS", "GRASIM.NS",
     "APOLLOHOSP.NS", "BRITANNIA.NS", "DIVISLAB.NS", "TATACONSUM.NS", "SBILIFE.NS",
-    "HDFCLIFE.NS", "BAJAJ-AUTO.NS", "UPL.NS", "LTIM.NS", "HINDALCO.NS",
+    "HDFCLIFE.NS", "BAJAJ-AUTO.NS", "UPL.NS", "LTM.NS", "HINDALCO.NS",
 ]
 
 SHORT_NAMES = {
@@ -80,7 +80,7 @@ def pct_to_color(pct):
     elif pct > 0:
         return (0.10, 0.55, 0.30, 1)
     elif pct == 0:
-        return (0.3, 0.3, 0.3, 1)
+        return (0.45, 0.45, 0.15, 1)  # neutral yellow-gray between green and red
     elif pct > -1:
         return (0.60, 0.10, 0.10, 1)
     elif pct > -2:
@@ -89,46 +89,46 @@ def pct_to_color(pct):
         return (0.55, 0.0, 0.0, 1)
 
 def fetch_nifty_data():
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     results = {}
+    index_data = {}
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'application/json',
     }
-    # Also fetch Nifty 50 index
-    index_data = {}
-    try:
-        url = 'https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?interval=1d&range=2d'
-        resp = requests.get(url, headers=headers, timeout=10)
-        data = resp.json()
-        closes = data['chart']['result'][0]['indicators']['quote'][0]['close']
-        closes = [c for c in closes if c is not None]
-        if len(closes) >= 2:
-            prev, curr = closes[-2], closes[-1]
-            pct = ((curr - prev) / prev) * 100
-            pts = curr - prev
-            index_data = {'price': curr, 'pct': pct, 'pts': pts}
-        dlog(f"Index: {index_data}")
-    except Exception as e:
-        dlog(f"Index fetch error: {e}")
 
-    for ticker in NIFTY50:
+    def fetch_one(ticker):
         try:
-            url = f'https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=2d'
-            resp = requests.get(url, headers=headers, timeout=10)
+            sym = '%5ENSEI' if ticker == '^NSEI' else ticker
+            url = f'https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=2d'
+            resp = requests.get(url, headers=headers, timeout=8)
             data = resp.json()
             closes = data['chart']['result'][0]['indicators']['quote'][0]['close']
             closes = [c for c in closes if c is not None]
             if len(closes) >= 2:
                 prev, curr = closes[-2], closes[-1]
                 pct = ((curr - prev) / prev) * 100
-                results[ticker] = (curr, pct)
+                return ticker, (curr, pct)
             elif len(closes) == 1:
-                results[ticker] = (closes[-1], None)
-            else:
-                results[ticker] = (None, None)
+                return ticker, (closes[-1], None)
+            return ticker, (None, None)
         except Exception as e:
             dlog(f"Error fetching {ticker}: {e}")
-            results[ticker] = (None, None)
+            return ticker, (None, None)
+
+    all_tickers = ['^NSEI'] + NIFTY50
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        futures = {executor.submit(fetch_one, t): t for t in all_tickers}
+        for future in as_completed(futures):
+            ticker, value = future.result()
+            if ticker == '^NSEI':
+                if value[0] and value[1] is not None:
+                    curr, pct = value
+                    index_data = {'price': curr, 'pct': pct, 'pts': curr - curr/(1+pct/100)}
+            else:
+                results[ticker] = value
+
+    dlog(f"Fetched {len(results)} stocks")
     return results, index_data
 
 
@@ -303,6 +303,7 @@ class NiftyHeatmapApp(App):
         root.add_widget(self.bottom_bar)
 
         Clock.schedule_once(lambda dt: self.start_refresh(), 0.5)
+        Clock.schedule_interval(lambda dt: self.start_refresh(), 60)
         return root
 
     def start_refresh(self, *args):
