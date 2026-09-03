@@ -96,7 +96,7 @@
   </div>
 </div>
 
-<footer>Data via Yahoo Finance · Auto-refreshes every 60s · Not investment advice</footer>
+<footer>Data via Yahoo Finance, refreshed every 5 min by GitHub Actions · Not investment advice</footer>
 
 <script>
 const NIFTY50 = [
@@ -145,29 +145,6 @@ function pctToColor(pct) {
   return "rgb(140,0,0)";
 }
 
-const PROXY = "https://api.allorigins.win/raw?url=";
-
-async function fetchQuote(ticker) {
-  const sym = ticker === "^NSEI" ? "%5ENSEI" : ticker;
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=2d`;
-  try {
-    const resp = await fetch(PROXY + encodeURIComponent(url));
-    const data = await resp.json();
-    const closes = data.chart.result[0].indicators.quote[0].close.filter(c => c !== null);
-    if (closes.length >= 2) {
-      const prev = closes[closes.length - 2];
-      const curr = closes[closes.length - 1];
-      const pct = ((curr - prev) / prev) * 100;
-      return { ticker, price: curr, pct };
-    } else if (closes.length === 1) {
-      return { ticker, price: closes[0], pct: null };
-    }
-    return { ticker, price: null, pct: null };
-  } catch (e) {
-    return { ticker, price: null, pct: null };
-  }
-}
-
 const grid = document.getElementById("grid");
 const status = document.getElementById("status");
 const refreshBtn = document.getElementById("refreshBtn");
@@ -194,13 +171,17 @@ async function refresh() {
   refreshBtn.disabled = true;
   status.textContent = "Loading…";
 
-  const all = ["^NSEI", ...NIFTY50];
-  const results = await Promise.all(all.map(fetchQuote));
+  let raw;
+  try {
+    const resp = await fetch("./data.json?t=" + Date.now());
+    raw = await resp.json();
+  } catch (e) {
+    status.textContent = "Fetch failed";
+    refreshBtn.disabled = false;
+    return;
+  }
 
-  const byTicker = {};
-  results.forEach(r => byTicker[r.ticker] = r);
-
-  const indexData = byTicker["^NSEI"];
+  const indexData = raw.index;
   if (indexData && indexData.price !== null && indexData.pct !== null) {
     const sign = indexData.pct >= 0 ? "+" : "";
     const pts = indexData.price - indexData.price / (1 + indexData.pct / 100);
@@ -208,7 +189,7 @@ async function refresh() {
     niftyPrice.innerHTML = `<b>NIFTY 50</b> <span style="color:${color}">${indexData.price.toLocaleString("en-IN", {maximumFractionDigits: 2})} ${sign}${indexData.pct.toFixed(2)}% (${sign}${pts.toFixed(2)} pts)</span>`;
   }
 
-  const stockResults = NIFTY50.map(t => byTicker[t]).filter(Boolean);
+  const stockResults = NIFTY50.map(t => raw.stocks[t] ? { ticker: t, ...raw.stocks[t] } : null).filter(Boolean);
   stockResults.sort((a, b) => (b.pct ?? -999) - (a.pct ?? -999));
 
   grid.innerHTML = "";
@@ -225,8 +206,8 @@ async function refresh() {
     `<div class="lb-row"><span>${shortName(l.ticker)}</span><span>${l.pct.toFixed(2)}% Rs.${l.price.toFixed(2)}</span></div>`
   ).join("");
 
-  const now = new Date();
-  updatedLabel.textContent = "Updated: " + now.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) + " IST";
+  const updatedAt = raw.updated ? new Date(raw.updated) : new Date();
+  updatedLabel.textContent = "Updated: " + updatedAt.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }) + " IST";
 
   const loaded = stockResults.filter(r => r.price !== null).length;
   status.textContent = `(${loaded}/50)`;
