@@ -87,11 +87,11 @@
 
 <div id="bottomBar">
   <div class="lb gainers">
-    <h3>TOP GAINERS</h3>
+    <h3>TOP GAINERS (off day low)</h3>
     <div id="gainersList"></div>
   </div>
   <div class="lb losers">
-    <h3>TOP LOSERS</h3>
+    <h3>TOP LOSERS (off day high)</h3>
     <div id="losersList"></div>
   </div>
 </div>
@@ -195,15 +195,17 @@ async function refresh() {
   grid.innerHTML = "";
   stockResults.forEach(item => grid.appendChild(renderTile(item)));
 
-  const valid = stockResults.filter(r => r.pct !== null);
-  const gainers = [...valid].sort((a, b) => b.pct - a.pct).slice(0, 4);
-  const losers = [...valid].sort((a, b) => a.pct - b.pct).slice(0, 4);
+  // Gainers = biggest bounce off the day's low; losers = biggest drop off the day's high
+  const validGainers = stockResults.filter(r => r.from_low_pct !== null && r.from_low_pct !== undefined);
+  const validLosers = stockResults.filter(r => r.from_high_pct !== null && r.from_high_pct !== undefined);
+  const gainers = [...validGainers].sort((a, b) => b.from_low_pct - a.from_low_pct).slice(0, 4);
+  const losers = [...validLosers].sort((a, b) => a.from_high_pct - b.from_high_pct).slice(0, 4);
 
   gainersList.innerHTML = gainers.map(g =>
-    `<div class="lb-row"><span>${shortName(g.ticker)}</span><span>+${g.pct.toFixed(2)}% Rs.${g.price.toFixed(2)}</span></div>`
+    `<div class="lb-row"><span>${shortName(g.ticker)}</span><span>+${g.from_low_pct.toFixed(2)}% off low · Rs.${g.price.toFixed(2)}</span></div>`
   ).join("");
   losersList.innerHTML = losers.map(l =>
-    `<div class="lb-row"><span>${shortName(l.ticker)}</span><span>${l.pct.toFixed(2)}% Rs.${l.price.toFixed(2)}</span></div>`
+    `<div class="lb-row"><span>${shortName(l.ticker)}</span><span>${l.from_high_pct.toFixed(2)}% off high · Rs.${l.price.toFixed(2)}</span></div>`
   ).join("");
 
   const updatedAt = raw.updated ? new Date(raw.updated) : new Date();

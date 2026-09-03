@@ -33,14 +33,19 @@ def fetch_one(ticker):
         meta = data["chart"]["result"][0]["meta"]
         curr = meta.get("regularMarketPrice")
         prev = meta.get("previousClose") or meta.get("chartPreviousClose")
-        if curr is not None and prev:
-            pct = ((curr - prev) / prev) * 100
-            return ticker, {"price": curr, "pct": pct}
-        elif curr is not None:
-            return ticker, {"price": curr, "pct": None}
-        return ticker, {"price": None, "pct": None}
+        day_low = meta.get("regularMarketDayLow")
+        day_high = meta.get("regularMarketDayHigh")
+        pct = ((curr - prev) / prev) * 100 if curr is not None and prev else None
+        from_low_pct = ((curr - day_low) / day_low) * 100 if curr is not None and day_low else None
+        from_high_pct = ((curr - day_high) / day_high) * 100 if curr is not None and day_high else None
+        return ticker, {
+            "price": curr,
+            "pct": pct,
+            "from_low_pct": from_low_pct,
+            "from_high_pct": from_high_pct,
+        }
     except Exception:
-        return ticker, {"price": None, "pct": None}
+        return ticker, {"price": None, "pct": None, "from_low_pct": None, "from_high_pct": None}
 
 
 def main():
