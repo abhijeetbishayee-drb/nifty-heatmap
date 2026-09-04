@@ -27,10 +27,16 @@ jobs:
           # steps rather than sys.executable, so the PATH default must also be 3.11.
           update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
           update-alternatives --set python3 /usr/bin/python3.11
+          # The image also ships /home/user/.venv, which sits earlier in PATH
+          # than /usr/bin and shadows our update-alternatives change with its
+          # own (Python 3.14) python3 — prepend /usr/bin so it wins instead.
+          echo "/usr/bin" >> "$GITHUB_PATH"
           python3 --version
 
       - name: Build APK
         run: |
+          which python3
+          python3 --version
           yes | python3 -m buildozer android debug
 
       - name: Verify APK exists
