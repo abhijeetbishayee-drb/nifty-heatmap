@@ -23,10 +23,15 @@ jobs:
           python3.11 -m ensurepip --upgrade
           python3.11 -m pip install --upgrade --ignore-installed pip setuptools wheel
           python3.11 -m pip install buildozer cython==0.29.36
+          # python-for-android shells out to the bare `python3` command in some
+          # steps rather than sys.executable, so the PATH default must also be 3.11.
+          update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+          update-alternatives --set python3 /usr/bin/python3.11
+          python3 --version
 
       - name: Build APK
         run: |
-          yes | python3.11 -m buildozer android debug
+          yes | python3 -m buildozer android debug
 
       - name: Verify APK exists
         run: |
