@@ -38,8 +38,10 @@ jobs:
           # respecting PATH order or sys.executable) — neutralize every copy
           # of it directly so nothing can discover it under that name at all.
           for p in $(which -a python3.14 2>/dev/null); do
-            echo "Disabling stray interpreter: $p"
-            mv "$p" "$p.disabled-by-ci"
+            if [ -e "$p" ]; then
+              echo "Disabling stray interpreter: $p"
+              mv "$p" "$p.disabled-by-ci"
+            fi
           done
           which -a python3.14 || echo "no python3.14 left on PATH"
 
