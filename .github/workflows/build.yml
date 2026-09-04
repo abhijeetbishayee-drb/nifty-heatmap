@@ -35,6 +35,16 @@ jobs:
 
       - name: Build APK
         run: |
+          # The container ships /home/user/.venv (a Python-3.14-based venv) and
+          # sets VIRTUAL_ENV=/home/user/.venv by default. Something in pip's or
+          # virtualenv's isolated-build seeding still finds/prefers that 3.14
+          # interpreter even with /usr/bin first on PATH and VIRTUAL_ENV unset
+          # in an earlier step (env vars don't persist across steps anyway) —
+          # so strip any .venv path component and unset VIRTUAL_ENV right here,
+          # in the same shell that runs buildozer.
+          unset VIRTUAL_ENV
+          export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.venv' | paste -sd: -)"
+          echo "PATH=$PATH"
           which python3
           python3 --version
           yes | python3 -m buildozer android debug
