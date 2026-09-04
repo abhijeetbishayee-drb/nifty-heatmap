@@ -3,6 +3,7 @@ import os
 import traceback
 import json
 import threading
+import webbrowser
 import requests
 from datetime import datetime
 
@@ -11,8 +12,10 @@ from kivy.uix.gridlayout import GridLayout
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.button import Button
+from kivy.uix.widget import Widget
 from kivy.uix.scrollview import ScrollView
-from kivy.graphics import Color, Rectangle
+from kivy.uix.behaviors import ButtonBehavior
+from kivy.graphics import Color, Rectangle, Line, Ellipse
 from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.metrics import dp, sp
@@ -47,6 +50,15 @@ NIFTY50 = [
     "HDFCLIFE.NS", "BAJAJ-AUTO.NS", "UPL.NS", "LTM.NS", "HINDALCO.NS",
 ]
 
+INDICES = {
+    "^NSEI": "nifty",
+    "^NSEBANK": "banknifty",
+}
+INDEX_LABELS = {
+    "nifty": "NIFTY 50",
+    "banknifty": "BANK NIFTY",
+}
+
 SHORT_NAMES = {
     "HINDUNILVR.NS": "HINDUNLVR",
     "BHARTIARTL.NS": "BHARTIARTL",
@@ -68,6 +80,10 @@ def get_short_name(ticker):
         return SHORT_NAMES[ticker]
     return ticker.replace(".NS", "").replace("-", "")[:9]
 
+def nse_url(ticker):
+    symbol = ticker.replace(".NS", "")
+    return f"https://www.nseindia.com/get-quotes/equity?symbol={symbol}"
+
 def pct_to_color(pct):
     if pct is None:
         return (0.25, 0.25, 0.25, 1)
@@ -88,53 +104,102 @@ def pct_to_color(pct):
     else:
         return (0.55, 0.0, 0.0, 1)
 
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'Accept': 'application/json',
+}
+
+def fetch_one(ticker):
+    try:
+        sym = ticker.replace('^', '%5E')
+        url = f'https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=5d'
+        resp = requests.get(url, headers=HEADERS, timeout=8)
+        data = resp.json()
+        meta = data['chart']['result'][0]['meta']
+        price = meta.get('regularMarketPrice')
+        pct = meta.get('regularMarketChangePercent')
+        pts = meta.get('fulldayChange')
+        day_high = meta.get('regularMarketDayHigh')
+        day_low = meta.get('regularMarketDayLow')
+        return ticker, (price, pct, pts, day_high, day_low)
+    except Exception as e:
+        dlog(f"Error fetching {ticker}: {e}")
+        return ticker, (None, None, None, None, None)
+
+
 def fetch_nifty_data():
     from concurrent.futures import ThreadPoolExecutor, as_completed
     results = {}
-    index_data = {}
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json',
-    }
+    indices = {}
 
-    def fetch_one(ticker):
-        try:
-            sym = '%5ENSEI' if ticker == '^NSEI' else ticker
-            url = f'https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=2d'
-            resp = requests.get(url, headers=headers, timeout=8)
-            data = resp.json()
-            closes = data['chart']['result'][0]['indicators']['quote'][0]['close']
-            closes = [c for c in closes if c is not None]
-            if len(closes) >= 2:
-                prev, curr = closes[-2], closes[-1]
-                pct = ((curr - prev) / prev) * 100
-                return ticker, (curr, pct)
-            elif len(closes) == 1:
-                return ticker, (closes[-1], None)
-            return ticker, (None, None)
-        except Exception as e:
-            dlog(f"Error fetching {ticker}: {e}")
-            return ticker, (None, None)
-
-    all_tickers = ['^NSEI'] + NIFTY50
+    all_tickers = list(INDICES.keys()) + NIFTY50
     with ThreadPoolExecutor(max_workers=20) as executor:
         futures = {executor.submit(fetch_one, t): t for t in all_tickers}
         for future in as_completed(futures):
             ticker, value = future.result()
-            if ticker == '^NSEI':
-                if value[0] and value[1] is not None:
-                    curr, pct = value
-                    index_data = {'price': curr, 'pct': pct, 'pts': curr - curr/(1+pct/100)}
+            if ticker in INDICES:
+                price, pct, pts, day_high, day_low = value
+                if price is not None and pct is not None:
+                    indices[INDICES[ticker]] = {
+                        'price': price, 'pct': pct, 'pts': pts,
+                        'dayHigh': day_high, 'dayLow': day_low,
+                    }
             else:
                 results[ticker] = value
 
-    dlog(f"Fetched {len(results)} stocks")
-    return results, index_data
+    dlog(f"Fetched {len(results)} stocks, indices={list(indices.keys())}")
+    return results, indices
 
 
-class StockTile(BoxLayout):
-    def __init__(self, ticker, tile_height=70, **kwargs):
-        super().__init__(orientation='vertical', padding=dp(2), spacing=0, **kwargs)
+class DayRangeBar(Widget):
+    """Small horizontal range bar: a line from day-low to day-high, with a
+    dot marking where the current price sits between them."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.day_low = None
+        self.day_high = None
+        self.price = None
+        self.line_color = Color(0.6, 0.6, 0.6, 0.5)
+        self.dot_color = Color(1, 1, 1, 1)
+        with self.canvas:
+            self.canvas.add(self.line_color)
+            self._line = Line(points=[], width=1.2)
+            self.canvas.add(self.dot_color)
+            self._dot = Ellipse(pos=(0, 0), size=(dp(6), dp(6)))
+        self.bind(pos=self._redraw, size=self._redraw)
+
+    def set_data(self, day_low, day_high, price, dot_rgba):
+        self.day_low = day_low
+        self.day_high = day_high
+        self.price = price
+        self.dot_color.rgba = dot_rgba
+        self._redraw()
+
+    def _redraw(self, *args):
+        y = self.y + self.height / 2.0
+        x0 = self.x + dp(3)
+        x1 = self.x + self.width - dp(3)
+        self._line.points = [x0, y, x1, y]
+
+        if self.day_low is None or self.day_high is None or self.price is None:
+            self._dot.size = (0, 0)
+            return
+        span = self.day_high - self.day_low
+        if span <= 0:
+            pos_ratio = 0.5
+        else:
+            pos_ratio = (self.price - self.day_low) / span
+            pos_ratio = max(0.0, min(1.0, pos_ratio))
+        dot_d = dp(6)
+        dot_x = x0 + (x1 - x0) * pos_ratio - dot_d / 2.0
+        self._dot.pos = (dot_x, y - dot_d / 2.0)
+        self._dot.size = (dot_d, dot_d)
+
+
+class StockTile(ButtonBehavior, BoxLayout):
+    def __init__(self, ticker, tile_height=86, **kwargs):
+        super().__init__(orientation='vertical', padding=(dp(4), dp(3)), spacing=dp(1), **kwargs)
         self.ticker = ticker
         self.size_hint_y = None
         self.height = tile_height
@@ -147,35 +212,54 @@ class StockTile(BoxLayout):
         fs_name = sp(10)
         fs_price = sp(9.5)
         fs_pct = sp(10)
+        fs_range = sp(7.5)
 
         self.name_label = Label(
             text=get_short_name(ticker), font_size=fs_name,
             bold=True, color=(1, 1, 1, 1),
-            size_hint_y=0.38, halign='center', valign='middle')
+            size_hint_y=0.22, halign='center', valign='middle')
         self.name_label.bind(size=self.name_label.setter('text_size'))
 
         self.price_label = Label(
             text='', font_size=fs_price, color=(1, 1, 1, 0.95),
-            size_hint_y=0.32, halign='center', valign='middle')
+            size_hint_y=0.19, halign='center', valign='middle')
         self.price_label.bind(size=self.price_label.setter('text_size'))
 
         self.pct_label = Label(
             text='', font_size=fs_pct, bold=True, color=(1, 1, 1, 1),
-            size_hint_y=0.30, halign='center', valign='middle')
+            size_hint_y=0.19, halign='center', valign='middle')
         self.pct_label.bind(size=self.pct_label.setter('text_size'))
+
+        self.range_bar = DayRangeBar(size_hint_y=0.18)
+
+        range_labels = BoxLayout(orientation='horizontal', size_hint_y=0.22)
+        self.low_label = Label(
+            text='', font_size=fs_range, color=(1, 1, 1, 0.75),
+            halign='left', valign='middle')
+        self.low_label.bind(size=self.low_label.setter('text_size'))
+        self.high_label = Label(
+            text='', font_size=fs_range, color=(1, 1, 1, 0.75),
+            halign='right', valign='middle')
+        self.high_label.bind(size=self.high_label.setter('text_size'))
+        range_labels.add_widget(self.low_label)
+        range_labels.add_widget(self.high_label)
 
         self.add_widget(self.name_label)
         self.add_widget(self.price_label)
         self.add_widget(self.pct_label)
+        self.add_widget(self.range_bar)
+        self.add_widget(range_labels)
 
     def _update_rect(self, *args):
         self.rect.pos = self.pos
         self.rect.size = self.size
 
-    def update(self, price, pct):
-        self.rect_color.rgba = pct_to_color(pct)
+    def update(self, price, pct, day_low, day_high):
+        color = pct_to_color(pct)
+        self.rect_color.rgba = color
         if price is not None:
-            self.price_label.text = f'Rs.{price:,.1f}'
+            decimals = 0 if price >= 1000 else 1
+            self.price_label.text = f'Rs.{price:,.{decimals}f}'
         else:
             self.price_label.text = 'N/A'
         if pct is not None:
@@ -183,6 +267,87 @@ class StockTile(BoxLayout):
             self.pct_label.text = f'{sign}{pct:.2f}%'
         else:
             self.pct_label.text = ''
+
+        if day_low is not None and day_high is not None and price is not None:
+            # dot color: light on dark tiles, dark on light tiles — pick by luminance
+            r, g, b, _a = color
+            luminance = 0.299 * r + 0.587 * g + 0.114 * b
+            dot_rgba = (0.08, 0.08, 0.08, 1) if luminance > 0.55 else (1, 1, 1, 1)
+            self.range_bar.set_data(day_low, day_high, price, dot_rgba)
+            self.low_label.text = f'{day_low:,.0f}'
+            self.high_label.text = f'{day_high:,.0f}'
+        else:
+            self.range_bar.set_data(None, None, None, (1, 1, 1, 1))
+            self.low_label.text = ''
+            self.high_label.text = ''
+
+    def on_release(self):
+        try:
+            webbrowser.open(nse_url(self.ticker))
+        except Exception as e:
+            dlog(f"Failed to open NSE page for {self.ticker}: {e}")
+
+
+class IndexCard(BoxLayout):
+    """Compact index readout with an inline day-range bar, used for both
+    NIFTY 50 and BANK NIFTY."""
+
+    def __init__(self, label, **kwargs):
+        super().__init__(orientation='vertical', padding=(dp(6), dp(2)), spacing=dp(1), **kwargs)
+        self.label_text = label
+        self.size_hint_y = None
+        self.height = dp(46)
+
+        with self.canvas.before:
+            Color(0.08, 0.08, 0.08, 1)
+            self._bg = Rectangle(pos=self.pos, size=self.size)
+        self.bind(pos=self._update_bg, size=self._update_bg)
+
+        top_row = BoxLayout(orientation='horizontal', size_hint_y=0.55)
+        self.name_label = Label(
+            text=label, font_size=sp(10.5), bold=True, color=(0.8, 0.8, 0.8, 1),
+            halign='left', valign='middle', size_hint_x=0.35)
+        self.name_label.bind(size=self.name_label.setter('text_size'))
+        self.value_label = Label(
+            text='--', font_size=sp(10.5), bold=True, color=(1, 1, 1, 1),
+            halign='right', valign='middle', markup=True)
+        self.value_label.bind(size=self.value_label.setter('text_size'))
+        top_row.add_widget(self.name_label)
+        top_row.add_widget(self.value_label)
+
+        self.range_bar = DayRangeBar(size_hint_y=0.45)
+
+        self.add_widget(top_row)
+        self.add_widget(self.range_bar)
+
+    def _update_bg(self, *args):
+        self._bg.pos = self.pos
+        self._bg.size = self.size
+
+    def update(self, data):
+        if not data:
+            self.value_label.text = '--'
+            self.range_bar.set_data(None, None, None, (1, 1, 1, 1))
+            return
+        price = data.get('price')
+        pct = data.get('pct')
+        pts = data.get('pts')
+        day_low = data.get('dayLow')
+        day_high = data.get('dayHigh')
+
+        if price is not None and pct is not None:
+            sign = '+' if pct >= 0 else ''
+            color = '00cc44' if pct >= 0 else 'ff4444'
+            self.value_label.text = (
+                f'{price:,.2f}  [color={color}]{sign}{pct:.2f}% ({sign}{pts:.1f})[/color]'
+            )
+        else:
+            self.value_label.text = '--'
+
+        if day_low is not None and day_high is not None and price is not None:
+            self.range_bar.set_data(day_low, day_high, price, (0.3, 0.7, 1, 1))
+        else:
+            self.range_bar.set_data(None, None, None, (1, 1, 1, 1))
 
 
 class NiftyHeatmapApp(App):
@@ -223,27 +388,20 @@ class NiftyHeatmapApp(App):
         header.add_widget(self.status_label)
         header.add_widget(refresh_btn)
 
-        # ── Index bar ────────────────────────────────────────────
-        self.index_bar = BoxLayout(size_hint_y=None, height=dp(30),
-                                   padding=[dp(8), dp(2)], spacing=dp(16))
-        with self.index_bar.canvas.before:
-            Color(0.08, 0.08, 0.08, 1)
-            self.idx_rect = Rectangle(pos=self.index_bar.pos, size=self.index_bar.size)
-        self.index_bar.bind(pos=lambda i, v: setattr(self.idx_rect, 'pos', v),
-                            size=lambda i, v: setattr(self.idx_rect, 'size', v))
+        # ── Index cards (Nifty 50 + Bank Nifty) ──────────────────
+        indices_row = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(2),
+                                padding=[dp(2), 0])
+        self.index_cards = {}
+        for key in ('nifty', 'banknifty'):
+            card = IndexCard(INDEX_LABELS[key])
+            self.index_cards[key] = card
+            indices_row.add_widget(card)
 
-        self.nifty_label = Label(text='NIFTY 50  --', font_size=sp(11),
-                                 bold=True, color=(0.8, 0.8, 0.8, 1),
-                                 halign='left', valign='middle')
-        self.nifty_label.bind(size=self.nifty_label.setter('text_size'))
-
-        self.updated_label = Label(text='', font_size=sp(10),
+        self.updated_label = Label(text='', font_size=sp(9.5),
                                    color=(0.55, 0.55, 0.55, 1),
-                                   halign='right', valign='middle')
+                                   size_hint_y=None, height=dp(16),
+                                   halign='center', valign='middle')
         self.updated_label.bind(size=self.updated_label.setter('text_size'))
-
-        self.index_bar.add_widget(self.nifty_label)
-        self.index_bar.add_widget(self.updated_label)
 
         # ── Heatmap grid (scrollable) ────────────────────────────
         self.scroll = ScrollView(do_scroll_x=False)
@@ -252,14 +410,14 @@ class NiftyHeatmapApp(App):
         self.grid.bind(minimum_height=self.grid.setter('height'))
 
         for ticker in NIFTY50:
-            tile = StockTile(ticker, tile_height=dp(68))
+            tile = StockTile(ticker, tile_height=dp(98))
             self.tiles[ticker] = tile
             self.grid.add_widget(tile)
 
         self.scroll.add_widget(self.grid)
 
         # ── Gainers / Losers bar ─────────────────────────────────
-        self.bottom_bar = BoxLayout(size_hint_y=None, height=dp(80),
+        self.bottom_bar = BoxLayout(size_hint_y=None, height=dp(90),
                                     padding=[dp(6), dp(4)], spacing=dp(4))
         with self.bottom_bar.canvas.before:
             Color(0.08, 0.08, 0.08, 1)
@@ -268,7 +426,7 @@ class NiftyHeatmapApp(App):
                              size=lambda i, v: setattr(self.bot_rect, 'size', v))
 
         gainers_box = BoxLayout(orientation='vertical')
-        self.gainers_title = Label(text='[b]TOP GAINERS[/b]', markup=True,
+        self.gainers_title = Label(text='[b]TOP GAINERS[/b] [size=8](off low)[/size]', markup=True,
                                    font_size=sp(10), color=(0.3, 1.0, 0.4, 1),
                                    size_hint_y=None, height=dp(18),
                                    halign='left', valign='middle')
@@ -281,7 +439,7 @@ class NiftyHeatmapApp(App):
         gainers_box.add_widget(self.gainers_label)
 
         losers_box = BoxLayout(orientation='vertical')
-        self.losers_title = Label(text='[b]TOP LOSERS[/b]', markup=True,
+        self.losers_title = Label(text='[b]TOP LOSERS[/b] [size=8](off high)[/size]', markup=True,
                                   font_size=sp(10), color=(1.0, 0.35, 0.35, 1),
                                   size_hint_y=None, height=dp(18),
                                   halign='left', valign='middle')
@@ -298,7 +456,8 @@ class NiftyHeatmapApp(App):
 
         # ── Assemble ─────────────────────────────────────────────
         root.add_widget(header)
-        root.add_widget(self.index_bar)
+        root.add_widget(indices_row)
+        root.add_widget(self.updated_label)
         root.add_widget(self.scroll)
         root.add_widget(self.bottom_bar)
 
@@ -313,60 +472,65 @@ class NiftyHeatmapApp(App):
     def fetch_data(self):
         dlog("fetch_data called")
         try:
-            results, index_data = fetch_nifty_data()
-            dlog(f"Got {len(results)} results, index={index_data}")
+            results, indices = fetch_nifty_data()
+            dlog(f"Got {len(results)} results, indices={indices}")
 
             def update_ui(dt):
                 self.stock_data = results
-                self.index_data = index_data
+                self.index_data = indices
 
-                # Sort tiles by pct descending
+                # Sort tiles by pct descending (session % change)
                 sorted_tickers = sorted(
                     NIFTY50,
-                    key=lambda t: results.get(t, (None, None))[1] or -999,
+                    key=lambda t: (results.get(t, (None, None, None, None, None))[1]
+                                   if results.get(t, (None,))[1] is not None else -999),
                     reverse=True
                 )
                 self.grid.clear_widgets()
                 for ticker in sorted_tickers:
                     tile = self.tiles[ticker]
-                    price, pct = results.get(ticker, (None, None))
-                    tile.update(price, pct)
+                    price, pct, pts, day_high, day_low = results.get(
+                        ticker, (None, None, None, None, None))
+                    tile.update(price, pct, day_low, day_high)
                     self.grid.add_widget(tile)
 
-                # Update index bar
-                if index_data:
-                    p = index_data.get('price', 0)
-                    pct = index_data.get('pct', 0)
-                    pts = index_data.get('pts', 0)
-                    sign = '+' if pct >= 0 else ''
-                    color = '00cc44' if pct >= 0 else 'ff4444'
-                    self.nifty_label.text = (
-                        f'[b]NIFTY 50[/b]  [color={color}]{p:,.2f}  '
-                        f'{sign}{pct:.2f}%  ({sign}{pts:.2f} pts)[/color]'
-                    )
-                    self.nifty_label.markup = True
+                # Update index cards
+                for key, card in self.index_cards.items():
+                    card.update(indices.get(key))
 
                 now = datetime.now().strftime('%d %b %Y  %H:%M:%S IST')
                 self.updated_label.text = f'Updated: {now}'
 
-                # Top gainers / losers
-                valid = [(t, results[t][0], results[t][1])
-                         for t in NIFTY50 if results[t][1] is not None]
-                gainers = sorted(valid, key=lambda x: x[2], reverse=True)[:4]
-                losers = sorted(valid, key=lambda x: x[2])[:4]
+                # Top gainers/losers: biggest move off the day's low/high
+                rows = []
+                for t in NIFTY50:
+                    price, pct, pts, day_high, day_low = results.get(
+                        t, (None, None, None, None, None))
+                    off_low = None
+                    if price is not None and day_low:
+                        off_low = (price - day_low) / day_low * 100
+                    off_high = None
+                    if price is not None and day_high:
+                        off_high = (price - day_high) / day_high * 100
+                    rows.append((t, price, off_low, off_high))
+
+                valid_low = [r for r in rows if r[2] is not None]
+                valid_high = [r for r in rows if r[3] is not None]
+                gainers = sorted(valid_low, key=lambda r: r[2], reverse=True)[:4]
+                losers = sorted(valid_high, key=lambda r: r[3])[:4]
 
                 g_text = '\n'.join(
-                    f'{get_short_name(t):<10}  +{pct:.2f}%  Rs.{price:,.2f}'
-                    for t, price, pct in gainers
+                    f'{get_short_name(t):<10}  +{off_low:.2f}%  Rs.{price:,.2f}'
+                    for t, price, off_low, off_high in gainers
                 )
                 l_text = '\n'.join(
-                    f'{get_short_name(t):<10}  {pct:.2f}%  Rs.{price:,.2f}'
-                    for t, price, pct in losers
+                    f'{get_short_name(t):<10}  {off_high:.2f}%  Rs.{price:,.2f}'
+                    for t, price, off_low, off_high in losers
                 )
                 self.gainers_label.text = g_text
                 self.losers_label.text = l_text
 
-                loaded = sum(1 for p, _ in results.values() if p is not None)
+                loaded = sum(1 for v in results.values() if v[0] is not None)
                 self.status_label.text = f'({loaded}/50)'
 
             Clock.schedule_once(update_ui, 0)
