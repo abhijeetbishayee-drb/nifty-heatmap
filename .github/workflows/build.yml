@@ -11,9 +11,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Python 3.11 (container's default python3 is now 3.14, which dropped the stdlib 'cgi' module that Cython's bundled Tempita still imports)
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends python3.11 python3.11-venv python3.11-dev || {
+            apt-get install -y --no-install-recommends software-properties-common
+            add-apt-repository -y ppa:deadsnakes/ppa
+            apt-get update -qq
+            apt-get install -y --no-install-recommends python3.11 python3.11-venv python3.11-dev
+          }
+          python3.11 -m ensurepip --upgrade
+          python3.11 -m pip install --upgrade pip setuptools wheel
+          python3.11 -m pip install buildozer cython==0.29.36
+
       - name: Build APK
         run: |
-          yes | buildozer android debug
+          yes | python3.11 -m buildozer android debug
 
       - name: Verify APK exists
         run: |
