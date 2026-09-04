@@ -3,8 +3,9 @@ title           = Nifty Heatmap
 package.name    = niftyheatmap
 package.domain  = com.nse
 source.dir      = .
-source.include_exts = py
-version         = 1.3
+source.include_exts = py,png
+version         = 1.4
+icon.filename   = %(source.dir)s/icon.png
 
 # Keeping kivy 2.2.1 — proven to build successfully
 requirements    = python3,kivy==2.2.1,requests,urllib3,certifi,charset-normalizer,idna

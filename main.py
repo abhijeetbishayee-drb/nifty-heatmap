@@ -11,11 +11,10 @@ from kivy.app import App
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
-from kivy.uix.button import Button
 from kivy.uix.widget import Widget
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.behaviors import ButtonBehavior
-from kivy.graphics import Color, Rectangle, Line, Ellipse
+from kivy.graphics import Color, Rectangle, RoundedRectangle, Line, Ellipse
 from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.metrics import dp, sp
@@ -103,6 +102,45 @@ def pct_to_color(pct):
         return (0.72, 0.05, 0.05, 1)
     else:
         return (0.55, 0.0, 0.0, 1)
+
+# Shared palette — matches the amber/near-black identity used across the
+# NSE index constituents web heatmap, so the app and web page read as one product.
+ACCENT_GOLD = (0.91, 0.72, 0.29, 1)      # #e8b84a
+BG_PANEL = (0.08, 0.08, 0.08, 1)
+BG_PANEL_2 = (0.10, 0.10, 0.10, 1)
+BORDER_GRAY = (0.22, 0.22, 0.22, 1)
+TILE_RADIUS = dp(8)
+
+
+class PillButton(ButtonBehavior, BoxLayout):
+    """A flat button with rounded corners and a pressed-state dim, used in
+    place of Kivy's default Button so it matches the app's rounded-card look."""
+
+    def __init__(self, text, bg_rgba=ACCENT_GOLD, text_color=(0.05, 0.05, 0.05, 1),
+                 font_size=None, **kwargs):
+        super().__init__(**kwargs)
+        self._bg_rgba = bg_rgba
+        with self.canvas.before:
+            self._color = Color(*bg_rgba)
+            self._rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(8)])
+        self.bind(pos=self._update_rect, size=self._update_rect)
+
+        self.label = Label(
+            text=text, bold=True, color=text_color,
+            font_size=font_size or sp(11.5))
+        self.add_widget(self.label)
+
+    def _update_rect(self, *args):
+        self._rect.pos = self.pos
+        self._rect.size = self.size
+
+    def on_press(self):
+        r, g, b, a = self._bg_rgba
+        self._color.rgba = (r * 0.8, g * 0.8, b * 0.8, a)
+
+    def on_release(self):
+        self._color.rgba = self._bg_rgba
+
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -206,7 +244,7 @@ class StockTile(ButtonBehavior, BoxLayout):
 
         with self.canvas.before:
             self.rect_color = Color(0.25, 0.25, 0.25, 1)
-            self.rect = Rectangle(pos=self.pos, size=self.size)
+            self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[TILE_RADIUS])
         self.bind(pos=self._update_rect, size=self._update_rect)
 
         fs_name = sp(10)
@@ -293,14 +331,14 @@ class IndexCard(BoxLayout):
     NIFTY 50 and BANK NIFTY."""
 
     def __init__(self, label, **kwargs):
-        super().__init__(orientation='vertical', padding=(dp(6), dp(2)), spacing=dp(1), **kwargs)
+        super().__init__(orientation='vertical', padding=(dp(8), dp(4)), spacing=dp(2), **kwargs)
         self.label_text = label
         self.size_hint_y = None
-        self.height = dp(46)
+        self.height = dp(48)
 
         with self.canvas.before:
-            Color(0.08, 0.08, 0.08, 1)
-            self._bg = Rectangle(pos=self.pos, size=self.size)
+            Color(*BG_PANEL)
+            self._bg = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(8)])
         self.bind(pos=self._update_bg, size=self._update_bg)
 
         top_row = BoxLayout(orientation='horizontal', size_hint_y=0.55)
@@ -368,20 +406,19 @@ class NiftyHeatmapApp(App):
         header.bind(pos=lambda i, v: setattr(self.hdr_rect, 'pos', v),
                     size=lambda i, v: setattr(self.hdr_rect, 'size', v))
 
-        title = Label(text='[b]NIFTY 50  HEATMAP[/b]', markup=True,
-                      font_size=sp(14), color=(1, 0.85, 0.1, 1),
+        title = Label(text='[b]NIFTY 50 · HEATMAP[/b]', markup=True,
+                      font_size=sp(14), color=ACCENT_GOLD,
                       size_hint_x=0.38, halign='left', valign='middle')
         title.bind(size=title.setter('text_size'))
 
-        self.status_label = Label(text='Tap Refresh', font_size=sp(10),
+        self.status_label = Label(text='Tap refresh', font_size=sp(10),
                                   color=(0.75, 0.75, 0.75, 1),
                                   size_hint_x=0.42, halign='right', valign='middle')
         self.status_label.bind(size=self.status_label.setter('text_size'))
 
-        refresh_btn = Button(text='⟳ Refresh', size_hint_x=None, width=dp(82),
-                             font_size=sp(11),
-                             background_color=(0.15, 0.45, 0.85, 1),
-                             background_normal='')
+        refresh_btn = PillButton('REFRESH', bg_rgba=ACCENT_GOLD,
+                                 size_hint=(None, None), width=dp(84), height=dp(30),
+                                 pos_hint={'center_y': 0.5})
         refresh_btn.bind(on_release=self.start_refresh)
 
         header.add_widget(title)
