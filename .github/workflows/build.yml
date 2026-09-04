@@ -21,7 +21,7 @@ jobs:
             apt-get install -y --no-install-recommends python3.11 python3.11-venv python3.11-dev
           }
           python3.11 -m ensurepip --upgrade
-          python3.11 -m pip install --upgrade pip setuptools wheel
+          python3.11 -m pip install --upgrade --ignore-installed pip setuptools wheel
           python3.11 -m pip install buildozer cython==0.29.36
 
       - name: Build APK
