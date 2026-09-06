@@ -326,6 +326,72 @@ class StockTile(ButtonBehavior, BoxLayout):
             dlog(f"Failed to open NSE page for {self.ticker}: {e}")
 
 
+class MoverRow(ButtonBehavior, BoxLayout):
+    """One row in the Top Gainers / Top Losers list: name, price, the
+    off-low or off-high %, and the same day-range bar used on tiles."""
+
+    def __init__(self, accent_rgba, **kwargs):
+        super().__init__(orientation='vertical', size_hint_y=None, height=dp(34),
+                         spacing=dp(1), **kwargs)
+        self.ticker = None
+        self.accent_rgba = accent_rgba
+
+        top = BoxLayout(orientation='horizontal', size_hint_y=0.5)
+        self.name_label = Label(text='', font_size=sp(9.5), bold=True, color=accent_rgba,
+                                halign='left', valign='middle', size_hint_x=0.36)
+        self.name_label.bind(size=self.name_label.setter('text_size'))
+        self.price_label = Label(text='', font_size=sp(9), color=accent_rgba,
+                                 halign='center', valign='middle', size_hint_x=0.34)
+        self.price_label.bind(size=self.price_label.setter('text_size'))
+        self.value_label = Label(text='', font_size=sp(9.5), bold=True, color=accent_rgba,
+                                 halign='right', valign='middle', size_hint_x=0.30)
+        self.value_label.bind(size=self.value_label.setter('text_size'))
+        top.add_widget(self.name_label)
+        top.add_widget(self.price_label)
+        top.add_widget(self.value_label)
+
+        self.range_bar = DayRangeBar(size_hint_y=0.28)
+
+        range_labels = BoxLayout(orientation='horizontal', size_hint_y=0.22)
+        self.low_label = Label(text='', font_size=sp(7), color=(1, 1, 1, 0.6),
+                               halign='left', valign='middle')
+        self.low_label.bind(size=self.low_label.setter('text_size'))
+        self.high_label = Label(text='', font_size=sp(7), color=(1, 1, 1, 0.6),
+                                halign='right', valign='middle')
+        self.high_label.bind(size=self.high_label.setter('text_size'))
+        range_labels.add_widget(self.low_label)
+        range_labels.add_widget(self.high_label)
+
+        self.add_widget(top)
+        self.add_widget(self.range_bar)
+        self.add_widget(range_labels)
+
+    def update(self, ticker, price, value_pct, day_low, day_high):
+        self.ticker = ticker
+        self.name_label.text = get_short_name(ticker) if ticker else ''
+        self.price_label.text = f'Rs.{price:,.2f}' if price is not None else 'N/A'
+        if value_pct is not None:
+            sign = '+' if value_pct >= 0 else ''
+            self.value_label.text = f'{sign}{value_pct:.2f}%'
+        else:
+            self.value_label.text = ''
+        if day_low is not None and day_high is not None and price is not None:
+            self.range_bar.set_data(day_low, day_high, price, self.accent_rgba)
+            self.low_label.text = f'{day_low:,.0f}'
+            self.high_label.text = f'{day_high:,.0f}'
+        else:
+            self.range_bar.set_data(None, None, None, self.accent_rgba)
+            self.low_label.text = ''
+            self.high_label.text = ''
+
+    def on_release(self):
+        if self.ticker:
+            try:
+                webbrowser.open(nse_url(self.ticker))
+            except Exception as e:
+                dlog(f"Failed to open NSE page for {self.ticker}: {e}")
+
+
 class IndexCard(BoxLayout):
     """Compact index readout with an inline day-range bar, used for both
     NIFTY 50 and BANK NIFTY."""
@@ -454,7 +520,11 @@ class NiftyHeatmapApp(App):
         self.scroll.add_widget(self.grid)
 
         # ── Gainers / Losers bar ─────────────────────────────────
-        self.bottom_bar = BoxLayout(size_hint_y=None, height=dp(90),
+        N_MOVERS = 5
+        GREEN_ACCENT = (0.3, 1.0, 0.4, 1)
+        RED_ACCENT = (1.0, 0.35, 0.35, 1)
+
+        self.bottom_bar = BoxLayout(size_hint_y=None, height=dp(210),
                                     padding=[dp(6), dp(4)], spacing=dp(4))
         with self.bottom_bar.canvas.before:
             Color(0.08, 0.08, 0.08, 1)
@@ -462,31 +532,27 @@ class NiftyHeatmapApp(App):
         self.bottom_bar.bind(pos=lambda i, v: setattr(self.bot_rect, 'pos', v),
                              size=lambda i, v: setattr(self.bot_rect, 'size', v))
 
-        gainers_box = BoxLayout(orientation='vertical')
+        gainers_box = BoxLayout(orientation='vertical', spacing=dp(2))
         self.gainers_title = Label(text='[b]TOP GAINERS[/b] [size=8](off low)[/size]', markup=True,
-                                   font_size=sp(10), color=(0.3, 1.0, 0.4, 1),
+                                   font_size=sp(10), color=GREEN_ACCENT,
                                    size_hint_y=None, height=dp(18),
                                    halign='left', valign='middle')
         self.gainers_title.bind(size=self.gainers_title.setter('text_size'))
-        self.gainers_label = Label(text='', font_size=sp(9.5),
-                                   color=(0.3, 1.0, 0.4, 1),
-                                   halign='left', valign='top', markup=True)
-        self.gainers_label.bind(size=self.gainers_label.setter('text_size'))
         gainers_box.add_widget(self.gainers_title)
-        gainers_box.add_widget(self.gainers_label)
+        self.gainer_rows = [MoverRow(GREEN_ACCENT) for _ in range(N_MOVERS)]
+        for row in self.gainer_rows:
+            gainers_box.add_widget(row)
 
-        losers_box = BoxLayout(orientation='vertical')
+        losers_box = BoxLayout(orientation='vertical', spacing=dp(2))
         self.losers_title = Label(text='[b]TOP LOSERS[/b] [size=8](off high)[/size]', markup=True,
-                                  font_size=sp(10), color=(1.0, 0.35, 0.35, 1),
+                                  font_size=sp(10), color=RED_ACCENT,
                                   size_hint_y=None, height=dp(18),
                                   halign='left', valign='middle')
         self.losers_title.bind(size=self.losers_title.setter('text_size'))
-        self.losers_label = Label(text='', font_size=sp(9.5),
-                                  color=(1.0, 0.35, 0.35, 1),
-                                  halign='left', valign='top', markup=True)
-        self.losers_label.bind(size=self.losers_label.setter('text_size'))
         losers_box.add_widget(self.losers_title)
-        losers_box.add_widget(self.losers_label)
+        self.loser_rows = [MoverRow(RED_ACCENT) for _ in range(N_MOVERS)]
+        for row in self.loser_rows:
+            losers_box.add_widget(row)
 
         self.bottom_bar.add_widget(gainers_box)
         self.bottom_bar.add_widget(losers_box)
@@ -549,23 +615,26 @@ class NiftyHeatmapApp(App):
                     off_high = None
                     if price is not None and day_high:
                         off_high = (price - day_high) / day_high * 100
-                    rows.append((t, price, off_low, off_high))
+                    rows.append((t, price, off_low, off_high, day_low, day_high))
 
                 valid_low = [r for r in rows if r[2] is not None]
                 valid_high = [r for r in rows if r[3] is not None]
-                gainers = sorted(valid_low, key=lambda r: r[2], reverse=True)[:4]
-                losers = sorted(valid_high, key=lambda r: r[3])[:4]
+                gainers = sorted(valid_low, key=lambda r: r[2], reverse=True)[:5]
+                losers = sorted(valid_high, key=lambda r: r[3])[:5]
 
-                g_text = '\n'.join(
-                    f'{get_short_name(t):<10}  +{off_low:.2f}%  Rs.{price:,.2f}'
-                    for t, price, off_low, off_high in gainers
-                )
-                l_text = '\n'.join(
-                    f'{get_short_name(t):<10}  {off_high:.2f}%  Rs.{price:,.2f}'
-                    for t, price, off_low, off_high in losers
-                )
-                self.gainers_label.text = g_text
-                self.losers_label.text = l_text
+                for i, row_widget in enumerate(self.gainer_rows):
+                    if i < len(gainers):
+                        t, price, off_low, off_high, day_low, day_high = gainers[i]
+                        row_widget.update(t, price, off_low, day_low, day_high)
+                    else:
+                        row_widget.update(None, None, None, None, None)
+
+                for i, row_widget in enumerate(self.loser_rows):
+                    if i < len(losers):
+                        t, price, off_low, off_high, day_low, day_high = losers[i]
+                        row_widget.update(t, price, off_high, day_low, day_high)
+                    else:
+                        row_widget.update(None, None, None, None, None)
 
                 loaded = sum(1 for v in results.values() if v[0] is not None)
                 self.status_label.text = f'({loaded}/50)'
