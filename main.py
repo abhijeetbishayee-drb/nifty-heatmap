@@ -590,12 +590,29 @@ class NiftyHeatmapApp(App):
                     reverse=True
                 )
                 self.grid.clear_widgets()
-                for ticker in sorted_tickers:
-                    tile = self.tiles[ticker]
-                    price, pct, pts, day_high, day_low = results.get(
-                        ticker, (None, None, None, None, None))
-                    tile.update(price, pct, day_low, day_high)
-                    self.grid.add_widget(tile)
+
+                # Rebuild the grid in small batches, yielding back to Kivy's
+                # clock between each one. Doing all 50 tiles (plus their
+                # canvas-drawn range bars) in a single callback can block the
+                # main thread long enough to trigger an Android ANR on
+                # slower devices/emulators.
+                idx = 0
+
+                def add_tile_batch(dt2):
+                    nonlocal idx
+                    batch_size = 8
+                    end = min(idx + batch_size, len(sorted_tickers))
+                    for ticker in sorted_tickers[idx:end]:
+                        tile = self.tiles[ticker]
+                        price, pct, pts, day_high, day_low = results.get(
+                            ticker, (None, None, None, None, None))
+                        tile.update(price, pct, day_low, day_high)
+                        self.grid.add_widget(tile)
+                    idx = end
+                    if idx < len(sorted_tickers):
+                        Clock.schedule_once(add_tile_batch, 0)
+
+                add_tile_batch(0)
 
                 # Update index cards
                 for key, card in self.index_cards.items():
