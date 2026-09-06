@@ -4,7 +4,6 @@ import traceback
 import json
 import threading
 import webbrowser
-import requests
 from datetime import datetime
 
 from kivy.app import App
@@ -18,6 +17,12 @@ from kivy.graphics import Color, Rectangle, RoundedRectangle, Line, Ellipse
 from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.metrics import dp, sp
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "nifty-heatmap-core"))
+from nifty_heatmap_core import (
+    NIFTY50, INDICES, fetch_all, build_rows, compute_movers, nse_url,
+    short_name as get_short_name,
+)
 
 # Debug log
 LOG_PATH = '/data/data/com.nse.niftyheatmap/files/debug.log'
@@ -35,53 +40,10 @@ except Exception:
 
 dlog("APP STARTING - Python: " + sys.version)
 
-# Nifty 50 tickers — TATAMOTORS replaced with TVSMOTOR (TMPV)
-NIFTY50 = [
-    "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS",
-    "HINDUNILVR.NS", "ITC.NS", "SBIN.NS", "BHARTIARTL.NS", "KOTAKBANK.NS",
-    "LT.NS", "AXISBANK.NS", "ASIANPAINT.NS", "MARUTI.NS", "HCLTECH.NS",
-    "SUNPHARMA.NS", "TITAN.NS", "ULTRACEMCO.NS", "BAJFINANCE.NS", "WIPRO.NS",
-    "ONGC.NS", "NTPC.NS", "POWERGRID.NS", "NESTLEIND.NS", "TECHM.NS",
-    "M&M.NS", "ADANIENT.NS", "ADANIPORTS.NS", "COALINDIA.NS", "JSWSTEEL.NS",
-    "TVSMOTOR.NS", "TATASTEEL.NS", "BAJAJFINSV.NS", "BPCL.NS", "DRREDDY.NS",
-    "CIPLA.NS", "EICHERMOT.NS", "HEROMOTOCO.NS", "INDUSINDBK.NS", "GRASIM.NS",
-    "APOLLOHOSP.NS", "BRITANNIA.NS", "DIVISLAB.NS", "TATACONSUM.NS", "SBILIFE.NS",
-    "HDFCLIFE.NS", "BAJAJ-AUTO.NS", "UPL.NS", "LTM.NS", "HINDALCO.NS",
-]
-
-INDICES = {
-    "^NSEI": "nifty",
-    "^NSEBANK": "banknifty",
-}
 INDEX_LABELS = {
     "nifty": "NIFTY 50",
     "banknifty": "BANK NIFTY",
 }
-
-SHORT_NAMES = {
-    "HINDUNILVR.NS": "HINDUNLVR",
-    "BHARTIARTL.NS": "BHARTIARTL",
-    "BAJAJFINSV.NS": "BAJAJFINS",
-    "APOLLOHOSP.NS": "APOLLOHOS",
-    "TATACONSUM.NS": "TATACONSU",
-    "HEROMOTOCO.NS": "HEROMOTOC",
-    "INDUSINDBK.NS": "INDUSINDB",
-    "ULTRACEMCO.NS": "ULTRACEMC",
-    "BAJAJ-AUTO.NS": "BAJAJ-AUT",
-    "ADANIPORTS.NS": "ADANIPORT",
-    "BAJFINANCE.NS": "BAJFINANC",
-    "COALINDIA.NS":  "COALINDIA",
-    "TVSMOTOR.NS":   "TMPV",
-}
-
-def get_short_name(ticker):
-    if ticker in SHORT_NAMES:
-        return SHORT_NAMES[ticker]
-    return ticker.replace(".NS", "").replace("-", "")[:9]
-
-def nse_url(ticker):
-    symbol = ticker.replace(".NS", "")
-    return f"https://www.nseindia.com/get-quotes/equity?symbol={symbol}"
 
 def pct_to_color(pct):
     if pct is None:
@@ -142,49 +104,9 @@ class PillButton(ButtonBehavior, BoxLayout):
         self._color.rgba = self._bg_rgba
 
 
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    'Accept': 'application/json',
-}
-
-def fetch_one(ticker):
-    try:
-        sym = ticker.replace('^', '%5E')
-        url = f'https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=5d'
-        resp = requests.get(url, headers=HEADERS, timeout=8)
-        data = resp.json()
-        meta = data['chart']['result'][0]['meta']
-        price = meta.get('regularMarketPrice')
-        pct = meta.get('regularMarketChangePercent')
-        pts = meta.get('fulldayChange')
-        day_high = meta.get('regularMarketDayHigh')
-        day_low = meta.get('regularMarketDayLow')
-        return ticker, (price, pct, pts, day_high, day_low)
-    except Exception as e:
-        dlog(f"Error fetching {ticker}: {e}")
-        return ticker, (None, None, None, None, None)
-
-
 def fetch_nifty_data():
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    results = {}
-    indices = {}
-
-    all_tickers = list(INDICES.keys()) + NIFTY50
-    with ThreadPoolExecutor(max_workers=20) as executor:
-        futures = {executor.submit(fetch_one, t): t for t in all_tickers}
-        for future in as_completed(futures):
-            ticker, value = future.result()
-            if ticker in INDICES:
-                price, pct, pts, day_high, day_low = value
-                if price is not None and pct is not None:
-                    indices[INDICES[ticker]] = {
-                        'price': price, 'pct': pct, 'pts': pts,
-                        'dayHigh': day_high, 'dayLow': day_low,
-                    }
-            else:
-                results[ticker] = value
-
+    results, indices = fetch_all(
+        NIFTY50, INDICES, on_error=lambda t, e: dlog(f"Error fetching {t}: {e}"))
     dlog(f"Fetched {len(results)} stocks, indices={list(indices.keys())}")
     return results, indices
 
@@ -622,34 +544,20 @@ class NiftyHeatmapApp(App):
                 self.updated_label.text = f'Updated: {now}'
 
                 # Top gainers/losers: biggest move off the day's low/high
-                rows = []
-                for t in NIFTY50:
-                    price, pct, pts, day_high, day_low = results.get(
-                        t, (None, None, None, None, None))
-                    off_low = None
-                    if price is not None and day_low:
-                        off_low = (price - day_low) / day_low * 100
-                    off_high = None
-                    if price is not None and day_high:
-                        off_high = (price - day_high) / day_high * 100
-                    rows.append((t, price, off_low, off_high, day_low, day_high))
-
-                valid_low = [r for r in rows if r[2] is not None]
-                valid_high = [r for r in rows if r[3] is not None]
-                gainers = sorted(valid_low, key=lambda r: r[2], reverse=True)[:5]
-                losers = sorted(valid_high, key=lambda r: r[3])[:5]
+                rows = build_rows(NIFTY50, results)
+                gainers, losers = compute_movers(rows)
 
                 for i, row_widget in enumerate(self.gainer_rows):
                     if i < len(gainers):
-                        t, price, off_low, off_high, day_low, day_high = gainers[i]
-                        row_widget.update(t, price, off_low, day_low, day_high)
+                        g = gainers[i]
+                        row_widget.update(g['ticker'], g['price'], g['offLow'], g['dayLow'], g['dayHigh'])
                     else:
                         row_widget.update(None, None, None, None, None)
 
                 for i, row_widget in enumerate(self.loser_rows):
                     if i < len(losers):
-                        t, price, off_low, off_high, day_low, day_high = losers[i]
-                        row_widget.update(t, price, off_high, day_low, day_high)
+                        l = losers[i]
+                        row_widget.update(l['ticker'], l['price'], l['offHigh'], l['dayLow'], l['dayHigh'])
                     else:
                         row_widget.update(None, None, None, None, None)
 
