@@ -177,17 +177,20 @@ class StockTile(ButtonBehavior, BoxLayout):
         self.name_label = Label(
             text=get_short_name(ticker), font_size=fs_name,
             bold=True, color=(1, 1, 1, 1),
-            size_hint_y=0.22, halign='center', valign='middle')
+            size_hint_y=0.22, halign='center', valign='middle',
+            shorten=True, shorten_from='right')
         self.name_label.bind(size=self.name_label.setter('text_size'))
 
         self.price_label = Label(
             text='', font_size=fs_price, color=(1, 1, 1, 0.95),
-            size_hint_y=0.19, halign='center', valign='middle')
+            size_hint_y=0.19, halign='center', valign='middle',
+            shorten=True, shorten_from='right')
         self.price_label.bind(size=self.price_label.setter('text_size'))
 
         self.pct_label = Label(
             text='', font_size=fs_pct, bold=True, color=(1, 1, 1, 1),
-            size_hint_y=0.19, halign='center', valign='middle')
+            size_hint_y=0.19, halign='center', valign='middle',
+            shorten=True, shorten_from='right')
         self.pct_label.bind(size=self.pct_label.setter('text_size'))
 
         self.range_bar = DayRangeBar(size_hint_y=0.18)
@@ -195,11 +198,13 @@ class StockTile(ButtonBehavior, BoxLayout):
         range_labels = BoxLayout(orientation='horizontal', size_hint_y=0.22)
         self.low_label = Label(
             text='', font_size=fs_range, color=(1, 1, 1, 0.75),
-            halign='left', valign='middle')
+            halign='left', valign='middle',
+            shorten=True, shorten_from='right')
         self.low_label.bind(size=self.low_label.setter('text_size'))
         self.high_label = Label(
             text='', font_size=fs_range, color=(1, 1, 1, 0.75),
-            halign='right', valign='middle')
+            halign='right', valign='middle',
+            shorten=True, shorten_from='right')
         self.high_label.bind(size=self.high_label.setter('text_size'))
         range_labels.add_widget(self.low_label)
         range_labels.add_widget(self.high_label)
@@ -260,13 +265,16 @@ class MoverRow(ButtonBehavior, BoxLayout):
 
         top = BoxLayout(orientation='horizontal', size_hint_y=0.5)
         self.name_label = Label(text='', font_size=sp(9.5), bold=True, color=accent_rgba,
-                                halign='left', valign='middle', size_hint_x=0.36)
+                                halign='left', valign='middle', size_hint_x=0.36,
+                                shorten=True, shorten_from='right')
         self.name_label.bind(size=self.name_label.setter('text_size'))
         self.price_label = Label(text='', font_size=sp(9), color=accent_rgba,
-                                 halign='center', valign='middle', size_hint_x=0.34)
+                                 halign='center', valign='middle', size_hint_x=0.34,
+                                 shorten=True, shorten_from='right')
         self.price_label.bind(size=self.price_label.setter('text_size'))
         self.value_label = Label(text='', font_size=sp(9.5), bold=True, color=accent_rgba,
-                                 halign='right', valign='middle', size_hint_x=0.30)
+                                 halign='right', valign='middle', size_hint_x=0.30,
+                                 shorten=True, shorten_from='right')
         self.value_label.bind(size=self.value_label.setter('text_size'))
         top.add_widget(self.name_label)
         top.add_widget(self.price_label)
@@ -276,10 +284,12 @@ class MoverRow(ButtonBehavior, BoxLayout):
 
         range_labels = BoxLayout(orientation='horizontal', size_hint_y=0.22)
         self.low_label = Label(text='', font_size=sp(7), color=(1, 1, 1, 0.6),
-                               halign='left', valign='middle')
+                               halign='left', valign='middle',
+                               shorten=True, shorten_from='right')
         self.low_label.bind(size=self.low_label.setter('text_size'))
         self.high_label = Label(text='', font_size=sp(7), color=(1, 1, 1, 0.6),
-                                halign='right', valign='middle')
+                                halign='right', valign='middle',
+                                shorten=True, shorten_from='right')
         self.high_label.bind(size=self.high_label.setter('text_size'))
         range_labels.add_widget(self.low_label)
         range_labels.add_widget(self.high_label)
@@ -332,7 +342,8 @@ class IndexCard(BoxLayout):
         top_row = BoxLayout(orientation='horizontal', size_hint_y=0.55)
         self.name_label = Label(
             text=label, font_size=sp(10.5), bold=True, color=(0.8, 0.8, 0.8, 1),
-            halign='left', valign='middle', size_hint_x=0.35)
+            halign='left', valign='middle', size_hint_x=0.35,
+            shorten=True, shorten_from='right')
         self.name_label.bind(size=self.name_label.setter('text_size'))
         self.value_label = Label(
             text='--', font_size=sp(10.5), bold=True, color=(1, 1, 1, 1),
@@ -429,8 +440,16 @@ class NiftyHeatmapApp(App):
         self.updated_label.bind(size=self.updated_label.setter('text_size'))
 
         # ── Heatmap grid (scrollable) ────────────────────────────
+        # Pick column count from the actual screen width so narrower phones
+        # get fewer, wider tiles instead of relying on text truncation alone
+        # to survive columns that are too cramped for the ticker/price text.
+        # 82dp/tile was the comfortable width on the device this was tuned
+        # against (~411dp wide, 5 columns); below that, drop a column.
+        width_dp = Window.width / dp(1)
+        grid_cols = max(3, min(5, int(width_dp // 82)))
+
         self.scroll = ScrollView(do_scroll_x=False)
-        self.grid = GridLayout(cols=5, spacing=dp(2), padding=dp(2),
+        self.grid = GridLayout(cols=grid_cols, spacing=dp(2), padding=dp(2),
                                size_hint_y=None)
         self.grid.bind(minimum_height=self.grid.setter('height'))
 
