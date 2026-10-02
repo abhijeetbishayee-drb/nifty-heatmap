@@ -1,30 +1,59 @@
 name: Build APK
 
-on: [push]
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
-    container:
-      image: kivy/buildozer:latest
-
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: true
 
-      - name: Build APK
-        run: |
-          yes | buildozer android debug
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
 
-      - name: Verify APK exists
-        run: |
-          ls -lh bin/*.apk
-          echo "✅ APK built successfully!"
+      - uses: gradle/actions/setup-gradle@v4
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - name: Decode signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "SIGNING_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No signing secrets - this build is debug-signed (installs, but each build has a different key, so updates need an uninstall first). Run scripts/setup-signing.sh once."
+          fi
+
+      - name: Build
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          if [ -n "$SIGNING_KEYSTORE" ]; then
+            ./gradlew --no-daemon :app:assembleRelease
+          else
+            ./gradlew --no-daemon :app:assembleDebug
+          fi
+
+      - name: Collect
+        run: |
+          mkdir out
+          tag=$([ -n "$SIGNING_KEYSTORE" ] && echo signed || echo debug)
+          src=$(find app/build/outputs -name '*.apk' | head -1)
+          cp "$src" "out/nifty-heatmap-2.0.${{ github.run_number }}-$tag.apk"
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
         with:
           name: nifty-heatmap-apk
-          path: bin/*.apk
+          path: out/*.apk
           retention-days: 30

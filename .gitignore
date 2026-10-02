@@ -1,4 +1,9 @@
-__pycache__/
-*.pyc
-.buildozer/
-bin/
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+captures/
+# Signing keys never live in the repo - see scripts/setup-signing.sh
+*.jks
+*.keystore
