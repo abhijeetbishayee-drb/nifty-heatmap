@@ -10,7 +10,15 @@
 # uninstall and reinstall.
 set -euo pipefail
 
-command -v keytool >/dev/null || export PATH="/opt/homebrew/opt/openjdk@21/bin:$PATH"
+# macOS ships /usr/bin/keytool as a stub that only says "Unable to locate a
+# Java Runtime", so "is keytool on PATH" proves nothing - check it RUNS, and
+# fall back to Homebrew's JDK. Done before any password prompt.
+if ! keytool -help >/dev/null 2>&1; then
+  for jdk in /opt/homebrew/opt/openjdk@21 /opt/homebrew/opt/openjdk /usr/local/opt/openjdk@21 /usr/local/opt/openjdk; do
+    if [ -x "$jdk/bin/keytool" ]; then export PATH="$jdk/bin:$PATH"; break; fi
+  done
+fi
+keytool -help >/dev/null 2>&1 || { echo "No working Java found. Install it with:  brew install openjdk@21   then run this again."; exit 1; }
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 KEYDIR="$HOME/Documents/android-signing-keys"
 KS="$KEYDIR/nifty-heatmap-sideload.jks"
