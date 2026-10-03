@@ -12,14 +12,14 @@ reaches the app without a new release.
 
 | | |
 |---|---|
-| Application ID | `io.github.abhijeetbishayee.niftyheatmap.sideload` |
+| Application ID | `com.sectorchakra.app.sideload` |
 | Min / target SDK | 26 (Android 8) / 36 (Android 16) |
 | Version | `2.0.<CI run number>` |
 
 ## Getting the APK
 
 Every push to `main` runs **Build APK** in the Actions tab; the APK is the
-`nifty-heatmap-apk` artifact.
+`sector-chakra-apk` artifact.
 
 Until signing is set up, CI produces a **debug-signed** APK. It installs fine,
 but every build has a different key, so each update needs an uninstall first.

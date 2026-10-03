@@ -10,11 +10,11 @@ val buildNumber = (System.getenv("VERSION_CODE") ?: "1").toInt()
 val keystorePath: String? = System.getenv("SIGNING_KEYSTORE")
 
 android {
-    namespace = "io.github.abhijeetbishayee.niftyheatmap"
+    namespace = "com.sectorchakra.app"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "io.github.abhijeetbishayee.niftyheatmap.sideload"
+        applicationId = "com.sectorchakra.app.sideload"
         minSdk = 26
         targetSdk = 36          // Play requires 36 for new apps/updates since 2026-08-31
         versionCode = buildNumber

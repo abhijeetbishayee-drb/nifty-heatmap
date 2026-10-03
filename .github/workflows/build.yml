@@ -49,11 +49,11 @@ jobs:
           mkdir out
           tag=$([ -n "$SIGNING_KEYSTORE" ] && echo signed || echo debug)
           src=$(find app/build/outputs -name '*.apk' | head -1)
-          cp "$src" "out/nifty-heatmap-2.0.${{ github.run_number }}-$tag.apk"
+          cp "$src" "out/sector-chakra-2.0.${{ github.run_number }}-$tag.apk"
           ls -l out
 
       - uses: actions/upload-artifact@v4
         with:
-          name: nifty-heatmap-apk
+          name: sector-chakra-apk
           path: out/*.apk
           retention-days: 30
